@@ -1,16 +1,222 @@
-on: [push]
+name: MetricsHub Sanity Check
+
+on:
+  push:
+    branches:
+      - main
+
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Enter the version to compare'
+        required: true
+        default: '0.9.0000-SNAPSHOT'
+      build_number:
+        description: 'Enter the build number to compare'
+        required: true
+        default: '59eb859c'
 
 jobs:
-  hello_world_job:
+  sanity-check-ubuntu:
     runs-on: ubuntu-latest
-    name: A job to say hello
+
     steps:
-      - uses: actions/checkout@v4
-      - id: foo
-        uses: MohammedSentry/hello-world-composite-action@v1
-        with:
-          who-to-greet: 'Mona the Octocat'
-      - run: echo random-number "$RANDOM_NUMBER"
-        shell: bash
-        env:
-          RANDOM_NUMBER: ${{ steps.foo.outputs.random-number }}
+    - name: Checkout this repository
+      uses: actions/checkout@v4
+
+    - name: Download artifacts from MetricsHub
+      run: |
+        # Define variables
+        OWNER="${{ github.repository_owner }}"
+        REPO="metricshub"
+        BRANCH="main"
+
+        # Debug - Print variables
+        echo "Owner: $OWNER"
+        echo "Repo: $REPO"
+        echo "Branch: $BRANCH"
+        
+        # Get the latest successful workflow run ID
+        WORKFLOW_RUNS=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" "https://api.github.com/repos/$OWNER/$REPO/actions/runs?branch=$BRANCH&status=completed&per_page=5")
+        RUN_ID=$(echo $WORKFLOW_RUNS | jq -r '.workflow_runs[] | select(.conclusion == "success") | .id' | head -n 1)
+        # Get the artifact download URL
+        ARTIFACTS_URL="https://api.github.com/repos/$OWNER/$REPO/actions/runs/$RUN_ID/artifacts"
+        ARTIFACTS=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" $ARTIFACTS_URL)
+        
+        # Extract artifact information
+        ARTIFACT_ID=$(echo $ARTIFACTS | jq -r '.artifacts[0].id')
+        DOWNLOAD_URL="https://api.github.com/repos/$OWNER/$REPO/actions/artifacts/$ARTIFACT_ID/zip"
+        
+        # Download the artifact
+        curl -L -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" -o artifact.zip $DOWNLOAD_URL
+        
+        # Unzip the artifact and extract tarball
+        mkdir -p artifacts
+        unzip artifact.zip -d artifacts
+        cd artifacts
+        tar -xzf metricshub-linux-*.tar.gz
+
+    - name: Run MetricsHub and get version
+      id: get_version
+      run: |
+        cd artifacts/metricshub/bin
+        VERSION_OUTPUT=$(./metricshub --version)
+        echo "$VERSION_OUTPUT"
+        # Extract the version and build number using grep and regex
+        AGENT_VERSION=$(echo "$VERSION_OUTPUT" | grep -oP 'MetricsHub Agent version \K[\d.]+(?:-[\w]+)?')
+        BUILD_NUMBER=$(echo "$VERSION_OUTPUT" | grep -oP '(?<=Build Number: )\w+')
+        echo "AGENT_VERSION=$AGENT_VERSION" >> $GITHUB_ENV
+        echo "BUILD_NUMBER=$BUILD_NUMBER" >> $GITHUB_ENV
+
+    - name: Compare version
+      run: |
+        INPUT_VERSION="${{ github.event.inputs.version }}"
+        AGENT_VERSION="${{ env.AGENT_VERSION }}"
+        if [ "$INPUT_VERSION" = "$AGENT_VERSION" ]; then
+          echo "The input version matches the current MetricsHub Agent version."
+        else
+          echo "The input version does not match the current MetricsHub Agent version. Version found: $AGENT_VERSION"
+          exit 1
+        fi
+
+    - name: Compare build number
+      run: |
+        expected_build_number="${{ github.event.inputs.build_number }}"
+        actual_build_number="${{ env.BUILD_NUMBER }}"
+        if [ "$actual_build_number" != "$expected_build_number" ]; then
+          echo "Build number mismatch: expected $expected_build_number, got $actual_build_number"
+          exit 1
+        else
+          echo "Build number match: $actual_build_number"
+        fi
+
+
+  sanity-check-windows:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout this repository
+      uses: actions/checkout@v4
+
+    - name: Download artifacts from MetricsHub
+      shell: pwsh
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        # Define variables
+        $OWNER = "${{ github.repository_owner }}"
+        $REPO = "metricshub"
+        $BRANCH = "main"
+
+        # Debug - Print variables
+        Write-Host "Owner: $OWNER"
+        Write-Host "Repo: $REPO"
+        Write-Host "Branch: $BRANCH"
+
+        # Get the latest successful workflow run ID
+        $workflow_runs = Invoke-RestMethod -Headers @{ Authorization = "Bearer $env:GITHUB_TOKEN" } -Uri "https://api.github.com/repos/$OWNER/$REPO/actions/runs?branch=$BRANCH&status=completed&per_page=5"
+        Write-Host "Workflow runs: $($workflow_runs | ConvertTo-Json -Depth 3)"
+        $run_id = ($workflow_runs.workflow_runs | Where-Object { $_.conclusion -eq "success" })[0].id
+        
+        # Debug - Print run_id
+        Write-Host "Run ID: $run_id"
+
+        # Get the artifact download URL
+        $artifacts_url = "https://api.github.com/repos/$OWNER/$REPO/actions/runs/$run_id/artifacts"
+        $artifacts = Invoke-RestMethod -Headers @{ Authorization = "Bearer $env:GITHUB_TOKEN" } -Uri $artifacts_url
+        
+        # Debug - Print artifacts
+        Write-Host "Artifacts: $($artifacts | ConvertTo-Json -Depth 3)"
+        
+        # Extract artifact information
+        $artifact = $artifacts.artifacts | Where-Object { $_.name -like "metricshub-windows*" } | Select-Object -First 1
+        if (-not $artifact) {
+          Write-Error "No artifact found with name starting with 'metricshub-windows'"
+          exit 1
+        }
+        $artifact_id = $artifact.id
+        $download_url = "https://api.github.com/repos/$OWNER/$REPO/actions/artifacts/$artifact_id/zip"
+        
+        # Debug - Print download URL
+        Write-Host "Download URL: $download_url"
+        
+        # Download the artifact
+        Invoke-WebRequest -Headers @{ Authorization = "Bearer $env:GITHUB_TOKEN" } -Uri $download_url -OutFile artifact.zip
+        
+        # Unzip the artifact
+        mkdir artifacts
+        Expand-Archive artifact.zip -DestinationPath artifacts
+        Expand-Archive artifacts\metricshub-windows*.zip -DestinationPath artifacts
+    - name: List extracted files
+      shell: pwsh
+      run: Get-ChildItem -Path artifacts -Recurse
+
+    - name: MetricsHub version
+      id: get_version
+      shell: pwsh
+      run: |
+        Write-Host "Attempting to find and run metricshub.exe"
+    
+        # Define output encoding
+        [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+    
+        # Find metricshub.exe and run it
+        $exe_path = Get-ChildItem -Path artifacts -Recurse -Filter MetricsHub.exe | Select-Object -First 1
+        if ($exe_path) {
+            Write-Host "Found metricshub.exe at $($exe_path.FullName)"
+            $version_output = & $exe_path.FullName --version
+            Write-Output "Raw version output:"
+            Write-Output "$version_output"
+    
+            # Extract the version and build number using regex
+            $version_regex = [regex]::new("MetricsHub Agent version ([\d.]+(?:-[\w]+)?)")
+            $build_number_regex = [regex]::new("Build Number: ([\w]+)")
+            $version_matches = $version_regex.Match($version_output)
+            $build_number_matches = $build_number_regex.Match($version_output)
+    
+            if ($version_matches.Success) {
+                $agent_version = $version_matches.Groups[1].Value
+                Write-Host "AGENT_VERSION=$agent_version"
+                echo "AGENT_VERSION=$agent_version" >> $env:GITHUB_ENV
+            } else {
+                Write-Host "No version number found in the output"
+                Write-Host "Version output: $version_output"
+                exit 1
+            }
+
+            if ($build_number_matches.Success) {
+                $build_number = $build_number_matches.Groups[1].Value
+                Write-Host "BUILD_NUMBER=$build_number"
+                echo "BUILD_NUMBER=$build_number" >> $env:GITHUB_ENV
+            } else {
+                Write-Host "No build number found in the output"
+                Write-Host "Build number output: $version_output"
+                exit 1
+            }
+        } else {
+            Write-Host "metricshub.exe not found"
+            exit 1
+        }
+
+    - name: Compare version
+      shell: pwsh
+      run: |
+        $input_version = "${{ github.event.inputs.version }}"
+        $agent_version = $env:AGENT_VERSION
+        if ($agent_version -ne $input_version) {
+          Write-Error "Version mismatch: expected $input_version, got $agent_version"
+          exit 1
+        } else {
+          Write-Host "Version match: $agent_version"
+        }
+    - name: Compare build number
+      shell: pwsh
+      run: |
+        $expected_build_number = "${{ github.event.inputs.build_number }}"
+        $actual_build_number = $env:BUILD_NUMBER
+        if ($actual_build_number -ne $expected_build_number) {
+          Write-Error "Build number mismatch: expected $expected_build_number, got $actual_build_number"
+          exit 1
+        } else {
+          Write-Host "Build number match: $actual_build_number"
+        }
