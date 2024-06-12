@@ -10,11 +10,9 @@ on:
       version:
         description: 'Enter the version to compare'
         required: true
-        default: '0.9.0000-SNAPSHOT'
       build_number:
         description: 'Enter the build number to compare'
         required: true
-        default: '59eb859c'
 
 jobs:
   sanity-check-ubuntu:
