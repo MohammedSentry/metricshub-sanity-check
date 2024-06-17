@@ -19,23 +19,20 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout this repository
-      uses: actions/checkout@v4
-
-    - name: Download artifacts from MetricsHub
+    - name: Download artifact from MetricsHub
       run: |
         # Define variables
-        OWNER="${{ github.repository_owner }}"
+        OWNER="sentrysoftware"
         REPO="metricshub"
         BRANCH="main"
-
+        
         # Debug - Print variables
         echo "Owner: $OWNER"
         echo "Repo: $REPO"
         echo "Branch: $BRANCH"
         
         # Get the latest successful workflow run ID
-        WORKFLOW_RUNS=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" "https://api.github.com/repos/$OWNER/$REPO/actions/runs?branch=$BRANCH&status=completed&per_page=5")
+        WORKFLOW_RUNS=$(curl -s -H "Authorization: token ***" "https://api.github.com/repos/$OWNER/$REPO/actions/runs?branch=$BRANCH&status=completed&per_page=5")
         RUN_ID=$(echo $WORKFLOW_RUNS | jq -r '.workflow_runs[] | select(.conclusion == "success") | .id' | head -n 1)
         # Get the artifact download URL
         ARTIFACTS_URL="https://api.github.com/repos/$OWNER/$REPO/actions/runs/$RUN_ID/artifacts"
@@ -52,7 +49,14 @@ jobs:
         mkdir -p artifacts
         unzip artifact.zip -d artifacts
         cd artifacts
-        tar -xzf metricshub-linux-*.tar.gz
+        
+        # Debug - List files in artifacts directory
+        echo "Files in artifacts directory:"
+        ls -l
+        
+        # Extract tarball (assuming the correct filename is known)
+        TAR_FILE=$(ls metricshub-linux-*.tar.gz)
+        tar -xzf $TAR_FILE
 
     - name: Run MetricsHub and get version
       id: get_version
