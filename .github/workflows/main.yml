@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Download artifact from MetricsHub
+      - name: Download artifact from MetricsHub
       run: |
         # Define variables
         OWNER="sentrysoftware"
@@ -33,17 +33,37 @@ jobs:
         
         # Get the latest successful workflow run ID
         WORKFLOW_RUNS=$(curl -s -H "Authorization: token ***" "https://api.github.com/repos/$OWNER/$REPO/actions/runs?branch=$BRANCH&status=completed&per_page=5")
+        echo "Workflow runs fetched:"
+        echo $WORKFLOW_RUNS | jq .
         RUN_ID=$(echo $WORKFLOW_RUNS | jq -r '.workflow_runs[] | select(.conclusion == "success") | .id' | head -n 1)
+        
+        if [ -z "$RUN_ID" ]; then
+          echo "No successful run ID found."
+          exit 1
+        fi
+
+        echo "Latest successful run ID: $RUN_ID"
+
         # Get the artifact download URL
         ARTIFACTS_URL="https://api.github.com/repos/$OWNER/$REPO/actions/runs/$RUN_ID/artifacts"
-        ARTIFACTS=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" $ARTIFACTS_URL)
+        ARTIFACTS=$(curl -s -H "Authorization: token ***" $ARTIFACTS_URL)
         
-        # Extract artifact information
+        echo "Artifacts fetched:"
+        echo $ARTIFACTS | jq .
+
         ARTIFACT_ID=$(echo $ARTIFACTS | jq -r '.artifacts[0].id')
+        
+        if [ -z "$ARTIFACT_ID" ]; then
+          echo "No artifact ID found."
+          exit 1
+        fi
+
         DOWNLOAD_URL="https://api.github.com/repos/$OWNER/$REPO/actions/artifacts/$ARTIFACT_ID/zip"
         
+        echo "Artifact download URL: $DOWNLOAD_URL"
+        
         # Download the artifact
-        curl -L -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" -o artifact.zip $DOWNLOAD_URL
+        curl -L -H "Authorization: token ***" -o artifact.zip $DOWNLOAD_URL
         
         # Unzip the artifact and extract tarball
         mkdir -p artifacts
@@ -56,6 +76,12 @@ jobs:
         
         # Extract tarball (assuming the correct filename is known)
         TAR_FILE=$(ls metricshub-linux-*.tar.gz)
+        
+        if [ -z "$TAR_FILE" ]; then
+          echo "No tarball found in artifacts."
+          exit 1
+        fi
+        
         tar -xzf $TAR_FILE
 
     - name: Run MetricsHub and get version
