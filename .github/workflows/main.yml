@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Download artifact from MetricsHub
+    - name: Download artifact from MetricsHub
       run: |
         # Define variables
         OWNER="sentrysoftware"
