@@ -133,12 +133,12 @@ jobs:
         BRANCH: main
       run: |
         # Debug - Print variables
-        Write-Host "Owner: $OWNER"
-        Write-Host "Repo: $REPO"
-        Write-Host "Branch: $BRANCH"
+        Write-Host "Owner: ${env:OWNER}"
+        Write-Host "Repo: ${env:REPO}"
+        Write-Host "Branch: ${env:BRANCH}"
 
         # Get the latest successful workflow run ID
-        $workflow_runs = Invoke-RestMethod -Headers @{ Authorization = "Bearer $env:GITHUB_TOKEN" } -Uri "https://api.github.com/repos/$OWNER/$REPO/actions/runs?branch=$BRANCH&status=completed&per_page=5"
+        $workflow_runs = Invoke-RestMethod -Headers @{ Authorization = "Bearer $env:GITHUB_TOKEN" } -Uri "https://api.github.com/repos/${env:OWNER}/${env:REPO}/actions/runs?branch=${env:BRANCH}&status=completed&per_page=5"
         Write-Host "Workflow runs: $($workflow_runs | ConvertTo-Json -Depth 3)"
         $run_id = ($workflow_runs.workflow_runs | Where-Object { $_.conclusion -eq "success" })[0].id
         
@@ -151,7 +151,7 @@ jobs:
         Write-Host "Latest successful run ID: $run_id"
 
         # Get the artifact download URL
-        $artifacts_url = "https://api.github.com/repos/$OWNER/$REPO/actions/runs/$run_id/artifacts"
+        $artifacts_url = "https://api.github.com/repos/${env:OWNER}/${env:REPO}/actions/runs/$run_id/artifacts"
         $artifacts = Invoke-RestMethod -Headers @{ Authorization = "Bearer $env:GITHUB_TOKEN" } -Uri $artifacts_url
         
         # Debug - Print artifacts
