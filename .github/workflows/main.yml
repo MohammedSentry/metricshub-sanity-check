@@ -20,23 +20,25 @@ jobs:
 
     steps:
     - name: Download artifact from MetricsHub
-      run: |
+      shell: bash
+      env:
         # Define variables
-        OWNER="sentrysoftware"
-        REPO="metricshub"
-        BRANCH="main"
-        
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        OWNER: ${{ github.repository_owner }}
+        REPO: metricshub
+        BRANCH: main
+      run: |
         # Debug - Print variables
         echo "Owner: $OWNER"
         echo "Repo: $REPO"
         echo "Branch: $BRANCH"
-        
+
         # Get the latest successful workflow run ID
-        WORKFLOW_RUNS=$(curl -s -H "Authorization: token ***" "https://api.github.com/repos/$OWNER/$REPO/actions/runs?branch=$BRANCH&status=completed&per_page=5")
+        WORKFLOW_RUNS=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" "https://api.github.com/repos/$OWNER/$REPO/actions/runs?branch=$BRANCH&status=completed&per_page=5")
         echo "Workflow runs fetched:"
         echo $WORKFLOW_RUNS | jq .
         RUN_ID=$(echo $WORKFLOW_RUNS | jq -r '.workflow_runs[] | select(.conclusion == "success") | .id' | head -n 1)
-        
+
         if [ -z "$RUN_ID" ]; then
           echo "No successful run ID found."
           exit 1
@@ -46,24 +48,22 @@ jobs:
 
         # Get the artifact download URL
         ARTIFACTS_URL="https://api.github.com/repos/$OWNER/$REPO/actions/runs/$RUN_ID/artifacts"
-        ARTIFACTS=$(curl -s -H "Authorization: token ***" $ARTIFACTS_URL)
+        ARTIFACTS=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" $ARTIFACTS_URL)
         
         echo "Artifacts fetched:"
         echo $ARTIFACTS | jq .
 
-        ARTIFACT_ID=$(echo $ARTIFACTS | jq -r '.artifacts[0].id')
+        DOWNLOAD_URL=$(echo $ARTIFACTS | jq -r '.artifacts[] | select(.name | startswith("metricshub-linux")) | .archive_download_url')
         
-        if [ -z "$ARTIFACT_ID" ]; then
+        if [ -z "$DOWNLOAD_URL" ]; then
           echo "No artifact ID found."
           exit 1
         fi
 
-        DOWNLOAD_URL="https://api.github.com/repos/$OWNER/$REPO/actions/artifacts/$ARTIFACT_ID/zip"
-        
         echo "Artifact download URL: $DOWNLOAD_URL"
         
         # Download the artifact
-        curl -L -H "Authorization: token ***" -o artifact.zip $DOWNLOAD_URL
+        curl -L -H "Authorization: Bearer $GITHUB_TOKEN" -o artifact.zip $DOWNLOAD_URL
         
         # Unzip the artifact and extract tarball
         mkdir -p artifacts
@@ -123,19 +123,15 @@ jobs:
     runs-on: windows-latest
 
     steps:
-    - name: Checkout this repository
-      uses: actions/checkout@v4
-
-    - name: Download artifacts from MetricsHub
+    - name: Download artifact from MetricsHub
       shell: pwsh
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      run: |
         # Define variables
-        $OWNER = "${{ github.repository_owner }}"
-        $REPO = "metricshub"
-        $BRANCH = "main"
-
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        OWNER: ${{ github.repository_owner }}
+        REPO: metricshub
+        BRANCH: main
+      run: |
         # Debug - Print variables
         Write-Host "Owner: $OWNER"
         Write-Host "Repo: $REPO"
@@ -146,8 +142,13 @@ jobs:
         Write-Host "Workflow runs: $($workflow_runs | ConvertTo-Json -Depth 3)"
         $run_id = ($workflow_runs.workflow_runs | Where-Object { $_.conclusion -eq "success" })[0].id
         
+        if (-not $run_id) {
+          Write-Error "No successful run ID found."
+          exit 1
+        }
+
         # Debug - Print run_id
-        Write-Host "Run ID: $run_id"
+        Write-Host "Latest successful run ID: $run_id"
 
         # Get the artifact download URL
         $artifacts_url = "https://api.github.com/repos/$OWNER/$REPO/actions/runs/$run_id/artifacts"
@@ -162,8 +163,7 @@ jobs:
           Write-Error "No artifact found with name starting with 'metricshub-windows'"
           exit 1
         }
-        $artifact_id = $artifact.id
-        $download_url = "https://api.github.com/repos/$OWNER/$REPO/actions/artifacts/$artifact_id/zip"
+        $download_url = $artifact.archive_download_url
         
         # Debug - Print download URL
         Write-Host "Download URL: $download_url"
